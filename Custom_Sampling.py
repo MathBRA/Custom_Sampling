@@ -54,7 +54,7 @@ def IRWEB(G, n):
     
     - Caminha aleatoriamente como SRW
     - A cada nó visitado, adiciona todos os seus vizinhos ao subgrafo (indução local)
-    - Remove arestas já usadas do grafo original
+    - Não remove arestas do grafo original, mas as marca como "usadas" para a caminhada
     - Usa pilha para backtracking
 
     Parâmetros:
@@ -64,6 +64,7 @@ def IRWEB(G, n):
     Retorna:
         networkx.Graph: subgrafo induzido a partir dos nós visitados
     """
+    # Sempre trabalhe com uma cópia para evitar modificar o grafo original
     G = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
     sampled_graph = nx.Graph()
 
@@ -73,50 +74,67 @@ def IRWEB(G, n):
 
     current_node = random.choice(nodes)
     stack = [current_node]
-    visited = set()
+    visited = set() # Conjunto de NÓS visitados pela caminhada (para contar até 'n')
+    walk_edges_visited = set() # Conjunto de ARESTAS percorridas pela caminhada (para evitar revisitações)
     
-    # Adiciona o nó inicial e seus vizinhos ao subgrafo
-    sampled_graph.add_node(current_node)
+    # --- INDUÇÃO LOCAL INICIAL OTIMIZADA ---
+    # Adiciona o nó inicial e todos os seus vizinhos imediatos (e arestas entre eles)
+    nodes_in_neighborhood = {current_node}
+    nodes_in_neighborhood.update(G.neighbors(current_node))
+
+    # Obtém a "view" do subgrafo induzido para esses nós
+    initial_induced_subgraph_view = G.subgraph(nodes_in_neighborhood)
+    # Adiciona os nós e arestas dessa "view" ao grafo amostrado
+    sampled_graph.add_nodes_from(initial_induced_subgraph_view.nodes())
+    sampled_graph.add_edges_from(initial_induced_subgraph_view.edges())
+    
+    # Marca o nó inicial como visitado pela caminhada
     visited.add(current_node)
-    
-    neighbors = list(G.neighbors(current_node))
-    for nb in neighbors:
-        sampled_graph.add_node(nb)
-        if G.has_edge(current_node, nb):
-            sampled_graph.add_edge(current_node, nb)
-        # Adiciona também vizinho <-> vizinho, se houver
-        for other_nb in neighbors:
-            if nb != other_nb and G.has_edge(nb, other_nb):
-                sampled_graph.add_edge(nb, other_nb)
 
     while len(visited) < n and stack:
+        # Encontra vizinhos disponíveis que ainda não foram "percorridos" a partir de current_node
         neighbors = list(G.neighbors(current_node))
+        available_next_nodes = []
+        for neighbor in neighbors:
+            # Verifica se a aresta (current_node, neighbor) não foi usada na caminhada
+            # Como grafos são não direcionados, verifica ambas as direções da tupla da aresta
+            if (current_node, neighbor) not in walk_edges_visited and \
+               (neighbor, current_node) not in walk_edges_visited:
+                available_next_nodes.append(neighbor)
 
-        if neighbors:
-            next_node = random.choice(neighbors)
-            G.remove_edge(current_node, next_node)
+        if available_next_nodes:
+            next_node = random.choice(available_next_nodes)
+            
+            # Marca a aresta como "percorrida" para futuras verificações
+            # IMPORTANTE: Adiciona ao walk_edges_visited, NÃO ao visited
+            walk_edges_visited.add((current_node, next_node))
+            walk_edges_visited.add((next_node, current_node)) # Para grafos não direcionados
 
+            # Se o próximo nó ainda não foi visitado pela caminhada principal
             if next_node not in visited:
-                visited.add(next_node)
+                visited.add(next_node) # Adiciona o NÓ ao conjunto de nós visitados
                 stack.append(next_node)
                 current_node = next_node
 
-                sampled_graph.add_node(current_node)
+                # --- INDUÇÃO LOCAL OTIMIZADA PARA O NÓ RECÉM-VISITADO ---
+                # Adiciona o current_node e todos os seus vizinhos imediatos (e arestas entre eles)
+                nodes_in_neighborhood = {current_node}
+                nodes_in_neighborhood.update(G.neighbors(current_node))
 
-                neighbors = list(G.neighbors(current_node))
-                for nb in neighbors:
-                    sampled_graph.add_node(nb)
-                    if G.has_edge(current_node, nb):
-                        sampled_graph.add_edge(current_node, nb)
-                    for other_nb in neighbors:
-                        if nb != other_nb and G.has_edge(nb, other_nb):
-                            sampled_graph.add_edge(nb, other_nb)
+                # Obtém a "view" do subgrafo induzido e adiciona ao sampled_graph
+                induced_subgraph_view = G.subgraph(nodes_in_neighborhood)
+                sampled_graph.add_nodes_from(induced_subgraph_view.nodes())
+                sampled_graph.add_edges_from(induced_subgraph_view.edges())
             else:
-                current_node = next_node  # mesmo já visitado, anda mesmo assim
+                # Se o next_node já foi visitado pela caminhada, apenas move para ele
+                # e não o conta novamente para 'n' nem adiciona seus vizinhos novamente
+                current_node = next_node
         else:
+            # Backtrack se não houver arestas disponíveis do current_node
             stack.pop()
             if stack:
                 current_node = stack[-1]
+            # else: stack está vazia, não pode mais fazer backtracking
 
     return sampled_graph
 
