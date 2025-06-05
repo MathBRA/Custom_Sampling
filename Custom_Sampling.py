@@ -3,50 +3,107 @@ import random
 from collections import deque
 
 
-def RWEB(G, n):
-    
+def RWEB(G, max_n, checkpoint_sizes):
     """
-    RANDOM WALK EDGE BLOCKING
+    RANDOM WALK EDGE BLOCKING com checkpoints.
+
+    - Caminha aleatoriamente, removendo arestas percorridas do grafo original.
+    - Utiliza uma pilha para backtracking.
+    - Retorna o subgrafo amostrado em pontos específicos (checkpoints).
 
     Parâmetros:
-        G (networkx.Graph): grafo original
-        n (int): número de nós a visitar
+        G (networkx.Graph): grafo original.
+        max_n (int): número MÁXIMO de nós que o subgrafo amostrado deve atingir.
+        checkpoint_sizes (list): Lista de inteiros, tamanhos de nós do subgrafo
+                                 amostrado nos quais uma cópia deve ser salva.
+                                 A lista DEVE estar em ordem crescente.
 
     Retorna:
-        networkx.Graph: subgrafo com os nós e arestas visitados
+        list: Uma lista de networkx.Graph, onde cada grafo é o sampled_graph
+              no momento em que seu número de nós atingiu um checkpoint.
+              A ordem dos grafos na lista corresponde à ordem de checkpoint_sizes.
     """
-    
-    G = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
+    # Sempre trabalha com uma cópia, pois as arestas serão removidas
+    G_copy = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
     sampled_graph = nx.Graph()
 
-    nodes = list(G.nodes())
+    nodes = list(G_copy.nodes())
     if not nodes:
-        return sampled_graph
+        # Se não há nós no grafo original, retorna grafos vazios para os checkpoints
+        return [sampled_graph] * len(checkpoint_sizes)
 
     # Inicializa pilha e primeiro nó aleatório
     start_node = random.choice(nodes)
     stack = [start_node]
-    sampled_graph.add_node(start_node)
+    sampled_graph.add_node(start_node) # Adiciona o nó inicial à amostra
 
-    while sampled_graph.number_of_nodes() < n and stack:
-        current_node = stack[-1]  # topo da pilha
-        neighbors = list(G.neighbors(current_node))
+    # Lista para armazenar os grafos nos checkpoints
+    checkpoint_graphs = [None] * len(checkpoint_sizes)
+    current_checkpoint_idx = 0
+    
+    # Garantir que os checkpoints estão em ordem crescente
+    checkpoint_sizes.sort()
+
+    # --- VERIFICAÇÃO DO PRIMEIRO CHECKPOINT (se start_node já atende) ---
+    while current_checkpoint_idx < len(checkpoint_sizes) and \
+          sampled_graph.number_of_nodes() >= checkpoint_sizes[current_checkpoint_idx]:
+        
+        checkpoint_graphs[current_checkpoint_idx] = sampled_graph.copy() # Copia o estado atual
+        current_checkpoint_idx += 1
+
+
+    # Loop principal da caminhada
+    # Continua enquanto não atingir max_n e a pilha não estiver vazia
+    while sampled_graph.number_of_nodes() < max_n and stack:
+        current_node = stack[-1] # Pega o nó no topo da pilha
+
+        # Encontra vizinhos do nó atual no grafo G_copy (que está sendo modificado)
+        neighbors = list(G_copy.neighbors(current_node))
+
         if neighbors:
-            # Escolhe vizinho aleatório e remove a aresta do grafo original
+            # Escolhe um vizinho aleatório
             next_node = random.choice(neighbors)
-            G.remove_edge(current_node, next_node)
+            
+            # Remove a aresta do grafo original G_copy (característica do RWEB)
+            G_copy.remove_edge(current_node, next_node)
 
-            # Adiciona ao grafo amostrado
-            sampled_graph.add_node(next_node)
+            # Adiciona o próximo nó e a aresta ao grafo amostrado
+            # Verifica se o nó já está na amostra para não contá-lo novamente no checkpoint
+            node_added_to_sample = False
+            if next_node not in sampled_graph:
+                sampled_graph.add_node(next_node)
+                node_added_to_sample = True # Indica que um novo nó foi adicionado à amostra real
+            
             sampled_graph.add_edge(current_node, next_node)
 
             # Empilha o próximo nó
             stack.append(next_node)
-        else:
-            # Backtrack (desempilha)
-            stack.pop()
 
-    return sampled_graph
+            # --- VERIFICAÇÃO DE CHECKPOINTS NO LOOP ---
+            # Se um novo nó foi adicionado à amostra, verifica se um checkpoint foi atingido
+            if node_added_to_sample:
+                while current_checkpoint_idx < len(checkpoint_sizes) and \
+                      sampled_graph.number_of_nodes() >= checkpoint_sizes[current_checkpoint_idx]:
+                    
+                    # Copia o estado atual da sampled_graph e armazena
+                    checkpoint_graphs[current_checkpoint_idx] = sampled_graph.copy()
+                    current_checkpoint_idx += 1
+        else:
+            # Se não há vizinhos disponíveis no grafo G_copy, faz backtracking (desempilha)
+            stack.pop()
+    
+    # Preenche checkpoints não atingidos:
+    # Se a caminhada terminou antes de atingir todos os checkpoints ou max_n,
+    # os checkpoints restantes recebem uma cópia do grafo amostrado final
+    for i in range(len(checkpoint_sizes)):
+        if checkpoint_graphs[i] is None:
+            # Se a amostra final tem nós, usa-a. Caso contrário, usa um grafo vazio.
+            if sampled_graph.number_of_nodes() > 0:
+                checkpoint_graphs[i] = sampled_graph.copy()
+            else:
+                checkpoint_graphs[i] = nx.Graph() # Retorna grafo vazio se a amostra não cresceu
+
+    return checkpoint_graphs
 
 
 def IRWEB(G, n):
