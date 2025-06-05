@@ -195,7 +195,7 @@ def IRWEB(G, n):
 
     return sampled_graph
 
-def SB(G, max_n, k, checkpoint_sizes):
+def SB(G, max_n, checkpoint_sizes, k):
     """
     Snowball Sampling baseado em BFS com limite de k vizinhos por nó e checkpoints.
 
