@@ -195,96 +195,179 @@ def IRWEB(G, n):
 
     return sampled_graph
 
-def SB(G, n, k):
+def SB(G, max_n, k, checkpoint_sizes):
     """
-    Snowball Sampling baseado em BFS com limite de k vizinhos por nó.
+    Snowball Sampling baseado em BFS com limite de k vizinhos por nó e checkpoints.
 
     - Inicia a partir de um nó aleatório.
     - Expande em largura, mas cada nó visita até k vizinhos aleatórios.
     - Utiliza fila (BFS) para explorar em camadas.
-    - Garante que no máximo n nós sejam visitados.
+    - O amostragem continua até que o sampled_graph atinja max_n nós.
+    - Retorna o subgrafo amostrado em pontos específicos (checkpoints).
 
     Parâmetros:
         G (networkx.Graph): grafo original
-        n (int): número máximo de nós a visitar
-        k (int): número máximo de vizinhos explorados por nó
+        max_n (int): número MÁXIMO de nós para o subgrafo amostrado.
+        k (int): número máximo de vizinhos explorados por nó.
+        checkpoint_sizes (list): Lista de inteiros, tamanhos de nós do subgrafo
+                                 amostrado nos quais uma cópia deve ser salva.
+                                 A lista DEVE estar em ordem crescente.
 
     Retorna:
-        networkx.Graph: subgrafo amostrado
+        list: Uma lista de networkx.Graph, onde cada grafo é o sampled_graph
+              no momento em que seu número de nós atingiu um checkpoint.
+              A ordem dos grafos na lista corresponde à ordem de checkpoint_sizes.
     """
-    G = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
+    G_copy = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
     sampled_graph = nx.Graph()
 
-    nodes = list(G.nodes())
+    nodes = list(G_copy.nodes())
     if not nodes:
-        return sampled_graph
+        return [sampled_graph] * len(checkpoint_sizes)
 
     visited = set()
     queue = deque()
 
-    # Começa com nó aleatório
+    checkpoint_graphs = [None] * len(checkpoint_sizes)
+    current_checkpoint_idx = 0
+    
+    checkpoint_sizes.sort()
+
     start_node = random.choice(nodes)
+    
     visited.add(start_node)
     sampled_graph.add_node(start_node)
     queue.append(start_node)
 
-    while queue and len(visited) < n:
-        current_node = queue.popleft()
-        neighbors = list(G.neighbors(current_node))
-        random.shuffle(neighbors)
+    while current_checkpoint_idx < len(checkpoint_sizes) and \
+          sampled_graph.number_of_nodes() >= checkpoint_sizes[current_checkpoint_idx]:
         
-        # Limita a até k vizinhos não visitados
-        count = 0
+        checkpoint_graphs[current_checkpoint_idx] = sampled_graph.copy()
+        current_checkpoint_idx += 1
+
+    while queue and sampled_graph.number_of_nodes() < max_n:
+        current_node = queue.popleft()
+        
+        neighbors = list(G_copy.neighbors(current_node))
+        random.shuffle(neighbors)
+
+        neighbors_to_explore_count = 0 
         for neighbor in neighbors:
+            # Verifica se o vizinho ainda não foi adicionado ao sampled_graph
             if neighbor not in visited:
+                # Se o limite de nós para a amostra já foi atingido, para
+                if sampled_graph.number_of_nodes() >= max_n:
+                    break
+
                 visited.add(neighbor)
                 sampled_graph.add_node(neighbor)
                 sampled_graph.add_edge(current_node, neighbor)
                 queue.append(neighbor)
-                count += 1
-                if len(visited) >= n or count >= k:
+                neighbors_to_explore_count += 1
+
+                # Verifica se o limite de 'k' vizinhos para o current_node foi atingido
+                # Este é o uso correto do parâmetro 'k' do seu SB original
+                if neighbors_to_explore_count >= k:
                     break
+
+                # --- VERIFICAÇÃO DE CHECKPOINTS ---
+                while current_checkpoint_idx < len(checkpoint_sizes) and \
+                      sampled_graph.number_of_nodes() >= checkpoint_sizes[current_checkpoint_idx]:
+                    
+                    checkpoint_graphs[current_checkpoint_idx] = sampled_graph.copy()
+                    current_checkpoint_idx += 1
             elif sampled_graph.has_node(neighbor):
-                sampled_graph.add_edge(current_node, neighbor)
+                if not sampled_graph.has_edge(current_node, neighbor):
+                    sampled_graph.add_edge(current_node, neighbor)
 
-    return sampled_graph
+    for i in range(len(checkpoint_sizes)):
+        if checkpoint_graphs[i] is None:
+            if sampled_graph.number_of_nodes() > 0:
+                checkpoint_graphs[i] = sampled_graph.copy()
+            else:
+                checkpoint_graphs[i] = nx.Graph()
 
-def TIES(G, n, p):
+    return checkpoint_graphs
+
+def TIES(G, max_n, checkpoint_sizes):
     """
-    Total Induction Edge Sampling (TIES)
+    Total Induction Edge Sampling (TIES) com checkpoints, usando valores absolutos para nós.
 
     - Amostra arestas aleatórias do grafo original.
     - Adiciona os dois nós da aresta à amostra.
-    - Repete até atingir uma fração p * n de nós amostrados.
-    - Em seguida, forma o subgrafo induzido contendo todas as arestas entre os nós amostrados.
+    - O processo de amostragem continua até que o número ABSOLUTO de nós amostrados
+      atinja 'max_n'.
+    - Durante esse processo, o subgrafo induzido é salvo em checkpoints definidos
+      por números ABSOLUTOS de nós.
 
     Parâmetros:
-        G (networkx.Graph): grafo original
-        n (int): número total de nós do grafo original
-        p (float): fração de nós desejada (ex: 0.1 para 10%)
+        G (networkx.Graph): grafo original.
+        max_n (int): número MÁXIMO ABSOLUTO de nós a serem amostrados.
+        checkpoint_sizes (list): Lista de inteiros, o número ABSOLUTO de nós
+                                 amostrados nos quais um subgrafo induzido
+                                 deve ser copiado e retornado.
+                                 A lista DEVE estar em ordem crescente.
 
     Retorna:
-        networkx.Graph: subgrafo induzido com os nós amostrados
+        list: Uma lista de networkx.Graph, onde cada grafo é o subgrafo induzido
+              no momento em que o número de nós amostrados atingiu um checkpoint.
+              A ordem dos grafos na lista corresponde à ordem de checkpoint_sizes.
     """
-    G = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
+    G_copy = nx.convert_node_labels_to_integers(G.copy(), 0, 'default', True)
     sampled_nodes = set()
-    edges = list(G.edges())
-    random.shuffle(edges)
+    edges = list(G_copy.edges()) # Pega uma lista de todas as arestas
+    random.shuffle(edges) # Embaralha para seleção aleatória de arestas
 
-    target_num_nodes = max(1, int(p * n))
+    # Lista para armazenar os grafos induzidos nos checkpoints
+    checkpoint_graphs = [None] * len(checkpoint_sizes)
+    current_checkpoint_idx = 0
+    
+    # Garantir que os checkpoints estão em ordem crescente
+    checkpoint_sizes.sort()
 
-    # Etapa 1: amostragem de arestas
+    # --- Lógica de Amostragem de Arestas e Checkpoints ---
     for u, v in edges:
-        sampled_nodes.add(u)
-        sampled_nodes.add(v)
-        if len(sampled_nodes) >= target_num_nodes:
+        # Se já atingimos o número máximo de nós alvo, paramos de adicionar novos
+        if len(sampled_nodes) >= max_n:
             break
 
-    # Etapa 2: indução de subgrafo
-    induced_graph = nx.Graph()
-    induced_graph.add_nodes_from(sampled_nodes)
-    for u, v in G.edges():
-        if u in sampled_nodes and v in sampled_nodes:
-            induced_graph.add_edge(u, v)
+        nodes_before_add = len(sampled_nodes) # Para verificar se novos nós foram adicionados
 
-    return induced_graph
+        # Adiciona os nós da aresta atual à amostra (se ainda não estiverem lá)
+        # Tenta adicionar o primeiro nó
+        if u not in sampled_nodes:
+            sampled_nodes.add(u)
+        # Tenta adicionar o segundo nó, mas verifica se já excedeu max_n com o primeiro
+        if v not in sampled_nodes and len(sampled_nodes) < max_n: # Só adiciona V se não ultrapassar max_n
+            sampled_nodes.add(v)
+        
+        # Se nenhum nó novo foi adicionado por esta aresta, continue para a próxima aresta
+        if len(sampled_nodes) == nodes_before_add:
+            continue
+
+        # --- VERIFICAÇÃO DE CHECKPOINTS ---
+        # Itera por todos os checkpoints que podem ter sido atingidos com a adição dos últimos nós
+        while current_checkpoint_idx < len(checkpoint_sizes) and \
+              len(sampled_nodes) >= checkpoint_sizes[current_checkpoint_idx]:
+            
+            # Forma o subgrafo induzido com os nós coletados ATÉ ESTE CHECKPOINT
+            # É FUNDAMENTAL copiar, pois sampled_nodes continuará crescendo
+            current_induced_graph = G_copy.subgraph(sampled_nodes).copy()
+            
+            checkpoint_graphs[current_checkpoint_idx] = current_induced_graph
+            current_checkpoint_idx += 1
+
+    # --- PREENCHE CHECKPOINTS NÃO ATINGIDOS ---
+    # Se a amostragem terminou antes de atingir todos os checkpoints,
+    # os checkpoints restantes recebem uma cópia do grafo amostrado final
+    for i in range(len(checkpoint_sizes)):
+        if checkpoint_graphs[i] is None:
+            # Se houver nós amostrados até o final da iteração, cria o grafo induzido final.
+            # Caso contrário, retorna um grafo vazio.
+            if sampled_nodes: # Se o conjunto sampled_nodes não estiver vazio
+                final_induced_graph = G_copy.subgraph(sampled_nodes).copy()
+                checkpoint_graphs[i] = final_induced_graph
+            else:
+                checkpoint_graphs[i] = nx.Graph() # Grafo vazio
+
+    return checkpoint_graphs
